@@ -8,7 +8,7 @@ from report_ui_pro import ProfessionalReportPage
 
 def setup_page_data(page):
     # 1. Person Info
-    page.set_person_info(name="测试用户", age="28岁", date_str="2026-02-04")
+    page.set_person_info(name="测试用户", age="28岁")
     
     # 2. Mock Data
     # Scores (High risk to show alert)

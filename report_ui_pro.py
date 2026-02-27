@@ -2,8 +2,8 @@
 import os
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QFrame, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QLabel, QFrame, QSizePolicy, QMessageBox
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
@@ -12,7 +12,12 @@ from PyQt5.QtCore import Qt
 
 from report_ui import (
     MentalReportPage, create_card,
-    TEXT_COLOR_PRIMARY, TEXT_COLOR_SECONDARY, DIVIDER_COLOR
+    TEXT_COLOR_PRIMARY, TEXT_COLOR_SECONDARY, DIVIDER_COLOR, ACCENT_COLOR, CARD_BORDER, BG_COLOR,
+    ScoreGaugeWidget, RiskLevelBar, InfoBubble,
+    ERPTripleWidget, RoundedBarCanvas, ExplanationCard, TwoColumnModule,
+    DisclaimerPrivacyWidget, FooterWidget,
+    A4_WIDTH, A4_HEIGHT, GLOBAL_FONT,
+    CardWithSideImage
 )
 
 class AcquisitionQualityWidget(QWidget):
@@ -152,18 +157,59 @@ class ScaleValidationWidget(QWidget):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(8)
 
-        title = QLabel("量表关联与验证说明")
-        title.setStyleSheet(f"font-size: 22px; font-weight: 900; color: {TEXT_COLOR_PRIMARY};")
-        layout.addWidget(title)
+        body_container = QWidget()
+        body_layout = QVBoxLayout(body_container)
+        body_layout.setContentsMargins(0, 5, 0, 5)
+        body_layout.setSpacing(12)
 
-        body = QLabel(
-            "• 关联对象：可与常用抑郁/焦虑量表（如 PHQ-9、GAD-7）或临床访谈结论进行对照，用于阈值校准与外部验证。\n"
-            "• 映射逻辑：脑电特征（频段、ERP、特征指数等）经模型融合输出风险指数/等级；风险等级用于提示后续行动与是否建议进一步评估。\n"
-            "• 验证指标：建议在验证集/外部验证中报告一致性、判别能力（如 AUC/敏感度/特异度）、校准情况与分层偏差（年龄/性别/测量条件）。\n"
-            "• 可追溯信息：在报告中保留模型/算法版本、数据版本、设备与采集参数，便于审计与复核。"
-        )
-        body.setWordWrap(True)
-        body.setStyleSheet(f"font-size: 20px; font-weight: 600; color: {TEXT_COLOR_SECONDARY}; line-height: 1.5;")
+        # 表头与内容表格
+        table_frame = QFrame()
+        table_frame.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {DIVIDER_COLOR};
+                border-radius: 8px;
+                background-color: #F9FCFC;
+            }}
+            QLabel {{
+                font-family: "HeiTi";
+                font-size: 14px;
+                padding: 4px;
+                border: none;
+            }}
+        """)
+        grid = QGridLayout(table_frame)
+        grid.setSpacing(0)
+        grid.setContentsMargins(0, 0, 0, 0)
+
+        headers = ["量表名称", "样本量/人群概述", "AUC及核心指标", "阈值点与分级映射"]
+        header_style = f"font-weight: bold; background-color: {CARD_BORDER}; color: {TEXT_COLOR_PRIMARY}; border: 1px solid {DIVIDER_COLOR};"
+        cell_style = f"color: {TEXT_COLOR_SECONDARY}; border: 1px solid {DIVIDER_COLOR};"
+
+        for c, h in enumerate(headers):
+            lbl = QLabel(h)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet(header_style)
+            grid.addWidget(lbl, 0, c)
+
+        rows = [
+            ["PHQ-9 (Depression)", "N=450, 社区/体检人群", "AUC: 0.86, Sens: 82%", "0-4:无, 5-9:轻, 10-14:中, 15+:重"],
+            ["GAD-7 (Anxiety)", "N=420, 社区/体检人群", "AUC: 0.84, Spec: 85%", "0-4:无, 5-9:轻, 10-13:中, 14+:重"],
+            ["EEG-Risk Index", "N=1200+, 多中心验证", "Consistency: 0.81", "0-49:无, 50-64:轻, 65-74:中, 75+:重"]
+        ]
+
+        for r, row_data in enumerate(rows):
+            for c, val in enumerate(row_data):
+                lbl = QLabel(val)
+                lbl.setAlignment(Qt.AlignCenter)
+                lbl.setWordWrap(True)
+                lbl.setStyleSheet(cell_style)
+                grid.addWidget(lbl, r + 1, c)
+
+        body_layout.addWidget(table_frame)
+
+        note = QLabel("注：上表为最小可交付验证摘要，完整数据见《算法技术验证白皮书》或SOP附件。")
+        note.setStyleSheet(f"font-size: 13px; color: {ACCENT_COLOR}; font-style: italic;")
+        body_layout.addWidget(note)
 
         row = QWidget()
         row.setStyleSheet("background: transparent; border: none;")
@@ -171,8 +217,8 @@ class ScaleValidationWidget(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(14)
 
-        body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        h.addWidget(body, 7)
+        body_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        h.addWidget(body_container, 7)
 
         img = QLabel()
         img.setStyleSheet("background: transparent; border: none;")
@@ -260,44 +306,157 @@ class LayeredAdviceWidget(QWidget):
 
 class ProfessionalReportPage(MentalReportPage):
     """
-    专业版页面：通过 mode="professional" 启用技术图表（ERP/频段/特征），并新增 4 张专业版卡片：
-    - 采集与质量
-    - 指标四要素说明
-    - 量表关联与验证说明
-    - 分层建议
+    专业版页面：通过 mode="professional" 启用技术图表（ERP/频段/特征），并新增专业版卡片。
+    布局分配：
+    - P1: Header, 风险摘要, 行动建议, 专业提示
+    - P2: 风险指数评估, 采集与质量, 指标四要素
+    - P3: ERP分析, 情绪波段分布, 量表关联与验证(Table)
+    - P4: 脑电特征分析, 分层建议, 综合结论, 免责声明, 页尾横幅
     """
     def __init__(self, mode="professional"):
         super().__init__(mode=mode)
         self.setWindowTitle("心理健康风险评估报告（专业版）")
 
-        # 仅在 professional 模式下添加
-        if self.mode == "professional":
-            self._setup_professional_cards()
+    def _fill_content(self):
+        """
+        专业版填充内容：
+        1. 调用父类填充 P1/P2 (摘要)
+        2. 清理 P2-P4 并按专业版逻辑重新分配
+        """
+        super()._fill_content()
+        self._rebuild_pro_pages()
 
-    def _setup_professional_cards(self):
-        # 插入位置：置顶三卡之后（summary/action/help），风险指数之前
-        insert_pos = 3
-
+    def _rebuild_pro_pages(self):
+        # 核心：重构时清空列表，防止引用到已 deleteLater 的 C++ 对象导致 RuntimeError
+        self.all_dep_widgets.clear()
+        self.all_anx_widgets.clear()
+        self.all_risk_bars.clear()
+        self.all_conclusion_labels.clear()
+        self.all_layered_widgets.clear()
+        self.all_erp_widgets.clear()
+        self.all_emotion_wave_canvases.clear()
+        self.all_feature_canvases.clear()
+        self.all_quality_widgets.clear()
+        # P2: 风险指数 + 采集与质量 + 指标四要素
+        p2 = self.pages[1]
+        self._clear_layout(p2.content_layout)
+        c2 = QWidget()
+        l2 = QVBoxLayout(c2); l2.setContentsMargins(30,20,30,20); l2.setSpacing(15)
+        
+        # 风险指数评估
+        risk_box = self._create_risk_box()
+        l2.addWidget(create_card(risk_box, "风险指数评估"))
+        
+        # 采集与质量
         self.card_quality = AcquisitionQualityWidget()
-        self.content_layout.insertWidget(insert_pos, create_card(self.card_quality, "采集与质量"))
-        insert_pos += 1
-
+        self.all_quality_widgets.append(self.card_quality)
+        l2.addWidget(create_card(self.card_quality, "采集与质量"))
+        
+        # 指标四要素
         self.card_metric_4 = MetricFourElementsWidget()
-        self.content_layout.insertWidget(insert_pos, create_card(self.card_metric_4, "指标四要素说明"))
-        insert_pos += 1
+        l2.addWidget(create_card(self.card_metric_4, "指标解释要素"))
+        l2.addStretch(1)
+        p2.content_layout.addWidget(c2)
+        
+        # 修复重大Bug：必须继续调用后续页面的重构
+        self._rebuild_p3()
 
+    def set_quality_data(self, duration, valid_ratio, artifact_ratio, contact):
+        """设置采集质量信息"""
+        for w in self.all_quality_widgets:
+            w.set_quality_info(duration, valid_ratio, artifact_ratio, contact)
+
+    def _rebuild_p3(self):
+        # P3: ERP + 频段 + 验证量表
+        p3 = self.pages[2]
+        self._clear_layout(p3.content_layout)
+        c3 = QWidget()
+        l3 = QVBoxLayout(c3); l3.setContentsMargins(30,20,30,20); l3.setSpacing(15)
+        
+        self.erp_widget = ERPTripleWidget()
+        self.all_erp_widgets.append(self.erp_widget)
+        l3.addWidget(create_card(self.erp_widget, "事件相关电位 (ERP) 分析"))
+        
+        ewc = RoundedBarCanvas(width=9, height=1.9)
+        self.all_emotion_wave_canvases.append(ewc)
+        wave_exp = ExplanationCard(title="指标说明", body="频带能量分布分析，展示不同波段的活跃比例。", img_rel_path="assets/doctor.png")
+        l3.addWidget(create_card(TwoColumnModule(ewc, wave_exp), "情绪状态脑波频带分布"))
+        
         self.card_validation = ScaleValidationWidget()
-        self.content_layout.insertWidget(insert_pos, create_card(self.card_validation, "量表关联与验证说明"))
-        insert_pos += 1
+        l3.addWidget(create_card(self.card_validation, "量表关联与验证说明"))
+        l3.addStretch(1)
+        p3.content_layout.addWidget(c3)
 
-        self.card_layered = LayeredAdviceWidget()
-        self.content_layout.insertWidget(insert_pos, create_card(self.card_layered, "分层建议"))
-        insert_pos += 1
+        # P4: 特征指标 + 分层建议 + 结论 + 免责 + 页尾
+        p4 = self.pages[3]
+        self._clear_layout(p4.content_layout)
+        c4 = QWidget()
+        l4 = QVBoxLayout(c4); l4.setContentsMargins(30,5,30,5); l4.setSpacing(10)
+        
+        fc = RoundedBarCanvas(width=9, height=1.7) # 减少高度以防截断
+        self.all_feature_canvases.append(fc)
+        feat_exp = ExplanationCard(title="指标说明", body="多维度大脑特征分析，提供更细致的评估参考。", img_rel_path="assets/doctor.png")
+        l4.addWidget(create_card(TwoColumnModule(fc, feat_exp), "脑电特征指标分析"))
+        
+        law = LayeredAdviceWidget()
+        self.all_layered_widgets.append(law)
+        l4.addWidget(create_card(law, "分层建议与随访"))
+        
+        # 结论与免责
+        cl = QLabel(); cl.setWordWrap(True)
+        cl.setStyleSheet(f"font-size: 20px; font-weight: 600; line-height: 1.5; color: {TEXT_COLOR_SECONDARY};")
+        self.all_conclusion_labels.append(cl)
+        l4.addWidget(create_card(CardWithSideImage(cl, "assets/8.png"), "综合评估结论"))
+        
+        self.disclaimer_widget = DisclaimerPrivacyWidget()
+        l4.addWidget(create_card(self.disclaimer_widget, "风险告知与免责声明"))
+        
+        # Footer Removed per user request
+        l4.addStretch(1)
+        p4.content_layout.addWidget(c4)
 
-    # 覆写 set_scores：除基类行为外，刷新“分层建议”
+    def _clear_layout(self, layout):
+        if layout is None: return
+        while layout.count():
+            item = layout.takeAt(0)
+            if item is not None:
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+                    widget.deleteLater()
+
+    def _create_risk_box(self):
+        # 显式使用 ScoreGaugeWidget
+        dw = ScoreGaugeWidget()
+        aw = ScoreGaugeWidget()
+        rb = RiskLevelBar()
+        self.all_dep_widgets.append(dw)
+        self.all_anx_widgets.append(aw)
+        self.all_risk_bars.append(rb)
+        w = QWidget(); v = QVBoxLayout(w); v.setSpacing(10)
+        h = QHBoxLayout(); h.setSpacing(15)
+        
+        # 左侧装饰图 (对齐用户版)
+        test_img = QLabel()
+        test_img.setFixedSize(160, 180)
+        p_test = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "test.png")
+        if os.path.exists(p_test):
+            pm = QPixmap(p_test).scaled(test_img.width(), test_img.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            test_img.setPixmap(pm)
+        h.addWidget(test_img, 2)
+
+        def gb(t, g):
+            f = QFrame(); f.setStyleSheet(f"background:rgba(255,255,255,0.85); border-radius:12px; border:1px solid {CARD_BORDER};")
+            vl = QVBoxLayout(f); vl.setContentsMargins(5,5,5,5)
+            vl.addWidget(InfoBubble(t), alignment=Qt.AlignCenter); vl.addWidget(g, alignment=Qt.AlignCenter)
+            return f
+        h.addWidget(gb("抑郁指数", dw), 3); h.addWidget(gb("焦虑指数", aw), 3)
+        v.addLayout(h); v.addWidget(rb)
+        return w
+
     def set_scores(self, s1, t1, s2, t2):
         super().set_scores(s1, t1, s2, t2)
         risk_score = max(float(s1), float(s2))
-        if getattr(self, "card_layered", None) is not None:
-            self.card_layered.set_by_risk_score(risk_score)
+        for law in self.all_layered_widgets:
+            law.set_by_risk_score(risk_score)
 

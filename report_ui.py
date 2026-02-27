@@ -46,6 +46,43 @@ WAVE_COLORS = {
     "Delta": "#00CEC9", "Theta": "#00B894", "Alpha": "#0984E3", "Beta":  "#FDCB6E", "Gamma": "#E17055"
 }
 
+# 字体层级定义
+FONT_SIZE_H1 = 44
+FONT_SIZE_H2 = 24
+FONT_SIZE_H3 = 20
+FONT_SIZE_BODY = 18
+FONT_SIZE_SMALL = 14
+
+class ReportPage(QFrame):
+    """单页 A4 容器"""
+    def __init__(self, page_num=1, total_pages=1, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(A4_WIDTH, A4_HEIGHT)
+        self.setObjectName("ReportPage")
+        self.setStyleSheet(f"QFrame#ReportPage {{ background-color: {BG_COLOR}; border: none; }}")
+        
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+        
+        # 内容区域
+        self.content_widget = QWidget()
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(15)
+        self.layout.addWidget(self.content_widget)
+        
+        self.layout.addStretch(1)
+        
+        # 页码
+        self.page_footer = QLabel(f"第 {page_num} 页 / 共 {total_pages} 页")
+        self.page_footer.setAlignment(Qt.AlignCenter)
+        self.page_footer.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {TEXT_COLOR_SECONDARY}; padding-bottom: 20px;")
+        self.layout.addWidget(self.page_footer)
+
+    def add_widget(self, widget):
+        self.content_layout.addWidget(widget)
+
 # ==========================================
 # 2. UI 组件
 # ==========================================
@@ -615,30 +652,32 @@ class ConclusionSummaryWidget(QWidget):
 
         self.key_hint = QLabel("重点提示：--")
         self.key_hint.setWordWrap(True)
-        self.key_hint.setStyleSheet(f"font-size: 22px; font-weight: 650; color: {TEXT_COLOR_SECONDARY}; line-height: 1.35;")
+        self.key_hint.setStyleSheet(f"font-size: 20px; font-weight: 600; color: {TEXT_COLOR_SECONDARY}; line-height: 1.5;")
         layout.addWidget(self.key_hint)
 
         self.small_note = QLabel("提示：本报告用于体检场景心理状态风险筛查/提示，不等同医学诊断或临床结论。")
         self.small_note.setWordWrap(True)
-        self.small_note.setStyleSheet(f"font-size: 20px; font-weight: 600; color: {TEXT_COLOR_SECONDARY}; line-height: 1.35;")
+        self.small_note.setStyleSheet(f"font-size: 20px; font-weight: 600; color: {TEXT_COLOR_SECONDARY}; line-height: 1.5;")
         layout.addWidget(self.small_note)
 
     @staticmethod
-    def _level_3(score: float) -> str:
-        """三档：低/中/高（默认采用 45/58 阈值骨架，可后续配置化）。"""
-        if score >= 58:
-            return "高"
-        if score >= 45:
-            return "中"
-        return "低"
+    def _level_4(score: float) -> str:
+        """四档：无风险/轻度/中度/重度 (对齐仪表盘 50/65/75 阈值)。"""
+        if score >= 75:
+            return "重度"
+        if score >= 65:
+            return "中度"
+        if score >= 50:
+            return "轻度"
+        return "无"
 
     @staticmethod
     def _risk_to_text(level: str) -> str:
-        return {"低": "低风险", "中": "中风险", "高": "高风险"}.get(level, level)
+        return {"无": "无风险", "轻度": "轻度风险", "中度": "中度风险", "重度": "重度风险"}.get(level, level)
 
     def set_scores(self, dep_score: float, anx_score: float, hint: str = ""):
-        dep_level = self._level_3(dep_score)
-        anx_level = self._level_3(anx_score)
+        dep_level = self._level_4(dep_score)
+        anx_level = self._level_4(anx_score)
         self.dep_line.setText(f"抑郁风险：{self._risk_to_text(dep_level)}（{dep_score:.0f}分）")
         self.anx_line.setText(f"焦虑风险：{self._risk_to_text(anx_level)}（{anx_score:.0f}分）")
 
@@ -646,21 +685,28 @@ class ConclusionSummaryWidget(QWidget):
             self.key_hint.setText(f"重点提示：{hint}")
             return
 
-        # 默认：更高者作为“当前更需关注的方向”（非诊断措辞）
+        # 获取更高风险分数对应的级别
+        max_score = max(dep_score, anx_score)
+        max_level = self._level_4(max_score)
+
         if anx_score >= dep_score:
-            if anx_level == "高":
-                msg = "近期压力/紧张相关信号偏高，可能伴随睡眠与躯体紧张反应，建议优先做压力管理与规律作息。"
-            elif anx_level == "中":
-                msg = "近期压力/紧张相关信号偏高，建议关注作息与压力管理，必要时结合问卷复筛。"
+            if max_level == "重度":
+                msg = "近期压力/紧张相关信号显著偏高，可能伴随持续的焦虑感与躯体反应，建议关注压力源并考虑专业评估。"
+            elif max_level == "中度":
+                msg = "近期压力/紧张相关信号偏高，建议通过正念/运动等方式进行主动调节，并关注睡眠质量。"
+            elif max_level == "轻度":
+                msg = "近期有轻度压力信号，建议保持规律作息，通过适度运动缓解紧张感。"
             else:
-                msg = "当前压力相关信号总体稳定，建议保持规律作息与适度运动。"
+                msg = "当前压力相关信号总体稳定，建议继续保持健康的生活方式。"
         else:
-            if dep_level == "高":
-                msg = "近期情绪低落相关信号偏高，建议关注睡眠、情绪波动与兴趣动力变化，并考虑结合问卷复筛。"
-            elif dep_level == "中":
-                msg = "近期情绪低落相关信号偏高，建议通过作息与活动安排进行调节，并关注持续时间。"
+            if max_level == "重度":
+                msg = "近期情绪低落相关信号显著偏高，建议关注兴趣动力与睡眠变化，并考虑结合专业问卷进一步了解。"
+            elif max_level == "中度":
+                msg = "近期情绪低落相关信号偏高，建议通过增加社交/兴趣活动进行调节，关注情绪持续时长。"
+            elif max_level == "轻度":
+                msg = "近期有轻度情绪波动信号，建议保持规律作息，增加户外活动或社交交流。"
             else:
-                msg = "当前情绪相关信号总体稳定，建议保持规律作息与社交/兴趣活动。"
+                msg = "当前情绪相关信号总体稳定，建议保持积极的心理状态与社交活动。"
         self.key_hint.setText(f"重点提示：{msg}")
 
 
@@ -990,16 +1036,9 @@ class InfoBubble(QFrame):
         layout.addWidget(label)
 
 class ScoreGaugeWidget(QWidget):
-    """
-    汽车仪表盘风格：72/100 这种圆形表盘
-    - 外圈阴影/层次
-    - 放射刻度线
-    - 进度弧（渐变高光）
-    - 中心大分数 + “满分100分”
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(220, 220)
+        self.setMinimumSize(190, 190)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         self.score = 0.0
@@ -1143,12 +1182,11 @@ class ScoreGaugeWidget(QWidget):
         painter.setPen(QColor(TEXT_COLOR_PRIMARY))
         painter.setFont(QFont(GLOBAL_FONT, 34, QFont.Black))  # 原来 36 -> 34
 
-        # 左移量（负数往左），上移量（更小的 y 更靠上）
         num_x_shift = -inner_r * 0.10
-        num_y_shift = -inner_r * 0.06
+        num_y_shift = -inner_r * 0.08
 
         painter.drawText(
-            QRectF(num_x_shift, cy - inner_r * 0.48 + num_y_shift, w, inner_r * 0.56),
+            QRectF(num_x_shift, cy - inner_r * 0.55 + num_y_shift, w, inner_r * 0.7),
             Qt.AlignHCenter | Qt.AlignVCenter,
             f"{v_int}"
         )
@@ -1618,367 +1656,44 @@ class MentalReportPage(QWidget):
         self.resize(1100, 1000)
         self.setStyleSheet(f"background-color: {BG_COLOR}; font-family: '{GLOBAL_FONT}';")
 
-        self.mode = mode  # 'client' or 'professional'
-        # 客户版新增卡片组件（结论/行动/专业帮助/免责声明）
-        self.summary_widget = None
-        self.action_widget = None
-        self.help_widget = None
-        self.disclaimer_widget = None
+        self.mode = mode
+
+        # 允许多个实例（分页系统中，某些组件可能在不同页面重复出现）
+        self.all_summary_widgets = []
+        self.all_dep_widgets = []
+        self.all_anx_widgets = []
+        self.all_risk_bars = []
+        self.all_action_widgets = []
+        self.all_conclusion_labels = []
+        self.all_layered_widgets = []
+        self.all_erp_widgets = []
+        self.all_emotion_wave_canvases = []
+        self.all_feature_canvases = []
+        self.all_quality_widgets = []
 
         self.scores_data = {'depression': 0, 'anxiety': 0}
         self.feature_values = {}
         self.emotion_wave_data = {}
+        
+        # 允许多个实例（分页系统中，某些组件可能在不同页面重复出现）
+        self.all_summary_widgets = []
+        self.all_dep_widgets = []
+        self.all_anx_widgets = []
+        self.all_risk_bars = []
+        self.all_action_widgets = []
+        self.all_conclusion_labels = []
+        self.all_layered_widgets = []
 
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("border: none;")
 
-        self.report_widget = QWidget()
-        # ✅ 报告画布：最小尺寸为A4，但允许随着窗口变化扩展，避免挤压/裁切
-        self.report_widget.setMinimumSize(A4_WIDTH, A4_HEIGHT)
-        self.report_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.report_widget.setStyleSheet(f"background-color: {BG_COLOR};")
-
-        # ===== 水印层（覆盖整个 report_widget）=====
-        self.watermark = WatermarkOverlay(
-            parent=self.report_widget,
-            text="欣理医疗",
-            logo_rel_path="assets/logo.png",
-            opacity=0.2,        # 50%透明度
-            angle_deg=-25,      # 斜着
-            tile_w=420,         # 平铺块宽（越大越稀疏）
-            tile_h=260,         # 平铺块高（越大越稀疏）
-            logo_h=32,          # logo高度
-            gap=14              # logo与文字间距
-        )
-        self.watermark.setGeometry(self.report_widget.rect())
-        self.watermark.raise_()  # ✅ 放到底层（不挡卡片内容）
-
-        self.main_layout = QVBoxLayout(self.report_widget)
-        self.main_layout.setContentsMargins(0, 0, 0, 30)
-        self.main_layout.setSpacing(0)
-
-        self.setup_header()
-
-        # ===== 叠层容器：让第一个卡片压住头图（70px）=====
-        self.header_stack = QWidget()
-        self.header_stack.setAttribute(Qt.WA_TranslucentBackground, True)
-
-        stack = QStackedLayout(self.header_stack)
-        stack.setStackingMode(QStackedLayout.StackAll)
-
-        # 内容容器（真正承载所有卡片）
-        self.content_container = QWidget()
-        self.content_layout = QVBoxLayout(self.content_container)
-        self.content_layout.setContentsMargins(30, 0, 30, 0)   # ✅ 顶部设 0，避免影响“压住70”
-        self.content_layout.setSpacing(15)
-
-        # 内容层：用一个“顶部占位”把内容整体放到 header 底部附近
-        self.content_layer = QWidget()
-        self.content_layer.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.content_layer.setStyleSheet("background: transparent;")
-
-        layer_layout = QVBoxLayout(self.content_layer)
-        layer_layout.setContentsMargins(0, 0, 0, 0)
-        layer_layout.setSpacing(0)
-
-        # ✅ header 高度=500，压住70 => 内容起点=500-70=430
-        self.content_top_y = self.header.height() - 70   
-        layer_layout.addSpacing(self.content_top_y)
-        layer_layout.addWidget(self.content_container)
-
-        # 叠放顺序：先 header，再 content（content 在上层才能“压住”）
-        self.avatar_overlay = TopAvatarOverlay(
-            girl_rel="assets/girl.png",
-            boy_rel="assets/boy.png",
-            avatar_h=120,
-            left_margin=55,
-            gap=50
-        )
-        stack.addWidget(self.avatar_overlay)
-
-        stack.addWidget(self.content_layer)
-        stack.addWidget(self.header)
-
-        # ✅ 关键：对齐小人 bottom 到第一个卡片顶边
-        self.avatar_overlay.set_anchor_y(self.content_top_y)
-
-        # main_layout 只加叠层容器（不要再单独加 header/content_container）
-        self.main_layout.addWidget(self.header_stack)
-
-        # ======================================================
-        # 客户版置顶卡片：先结论—行动—专业帮助（符合修订意见阅读路径）
-        # ======================================================
-        self.summary_widget = ConclusionSummaryWidget()
-        summary_with_img = CardWithSideImage(
-            self.summary_widget,
-            "assets/5.png"
-        )
-        self.content_layout.addWidget(
-            create_card(summary_with_img, "结论卡片（筛查提示）")
-        )
-
-        self.action_widget = ActionAdviceWidget()
-        action_with_img = CardWithSideImage(
-            self.action_widget,
-            "assets/6.png"
-        )
-        self.content_layout.addWidget(
-            create_card(action_with_img, "行动建议")
-        )
-
-        self.help_widget = ProfessionalHelpWidget()
-        help_with_img = CardWithSideImage(
-            self.help_widget,
-            "assets/7.png"
-        )
-        self.content_layout.addWidget(
-            create_card(help_with_img, "需要专业帮助的提示")
-        )
-
-        # 页尾免责声明卡（客户版必备）：在最后一个内容卡片后追加
-        self.disclaimer_widget = DisclaimerPrivacyWidget()
-
-        # 1. 风险指数 (Card) —— 改成：双仪表盘卡片 + 气泡说明 + 分段状态条
-        risk_content_layout = QVBoxLayout()
-        risk_content_layout.setSpacing(14)
-        risk_content_layout.setContentsMargins(0, 0, 0, 0)
-
-        def create_gauge_panel(title: str, bubble_text: str, gauge_widget: QWidget) -> QFrame:
-            panel = QFrame()
-            panel.setStyleSheet(f"""
-                QFrame {{
-                    background-color: rgba(255, 255, 255, 0.88);
-                    border-radius: 18px;
-                    border: 1px solid rgba(214, 238, 241, 0.95);
-                }}
-            """)
-            shadow = QGraphicsDropShadowEffect()
-            shadow.setBlurRadius(22)
-            shadow.setColor(QColor(0, 80, 90, 35))
-            shadow.setOffset(0, 8)
-            panel.setGraphicsEffect(shadow)
-
-            v = QVBoxLayout(panel)
-            v.setContentsMargins(18, 14, 18, 16)
-            v.setSpacing(8)
-            v.setAlignment(Qt.AlignCenter)
-
-            # ✅ 旧版 InfoBubble：只传一个字符串
-            bubble = InfoBubble(f"{title}：{bubble_text}")
-            v.addWidget(bubble, alignment=Qt.AlignCenter)
-
-            # ✅ 仪表盘凸出
-            lift_wrap = QWidget()
-            lift_wrap.setAttribute(Qt.WA_TranslucentBackground, True)
-            lift_wrap.setStyleSheet("background: transparent; border: none;")
-
-            lw = QVBoxLayout(lift_wrap)
-            lw.setContentsMargins(0, -26, 0, 0)  # 凸出量：-18 / -26 / -32
-            lw.setSpacing(0)
-            lw.addWidget(gauge_widget, alignment=Qt.AlignCenter)
-
-            v.addWidget(lift_wrap, alignment=Qt.AlignCenter)
-            return panel
-
-        # 两个仪表盘实例
-        self.dep_widget = ScoreGaugeWidget()
-        self.anx_widget = ScoreGaugeWidget()
-
-        dep_panel = create_gauge_panel(
-            "抑郁指数",
-            "反映近期情绪低落、兴趣减退相关风险",
-            self.dep_widget
-        )
-
-        anx_panel = create_gauge_panel(
-            "焦虑指数",
-            "反映紧张、担忧与生理唤醒水平",
-            self.anx_widget
-        )
-
-        # 顶部：左侧单张图片 + 右侧两个仪表盘卡片（图片在大背景卡片中，不属于45/58任意一个小卡）
-        top_row = QHBoxLayout()
-        top_row.setSpacing(18)
-        top_row.setContentsMargins(0, 0, 0, 0)
-
-        # ✅ 左侧单张图片（无背景）
-        img_label = QLabel()
-        img_label.setStyleSheet("background: transparent; border: none;")
-        img_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-        test_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "test.png")
-        if os.path.exists(test_path):
-            pm = QPixmap(test_path)
-            if not pm.isNull():
-                # ✅ 图片再放大一点：改这里的高度
-                pm = pm.scaledToHeight(180, Qt.SmoothTransformation)
-                img_label.setPixmap(pm)
-
-        # 给图片一个固定占位宽度，避免挤压右侧卡片（按需要调）
-        img_label.setFixedWidth(135)
-
-        top_row.addWidget(img_label, 0)
-
-        # ✅ 右侧：两个仪表盘小卡片（仍然各自独立，不和图片混在同一个小卡里）
-        gauge_row = QHBoxLayout()
-        gauge_row.setSpacing(30)
-        gauge_row.setContentsMargins(0, 0, 0, 0)
-        gauge_row.addWidget(dep_panel, 1)
-        gauge_row.addWidget(anx_panel, 1)
-
-        top_row.addLayout(gauge_row, 1)
-
-        # 放进风险模块内容布局
-        risk_content_layout.addLayout(top_row)
-
-        # 下半部分：分段状态条（值=平均值，显示“当前”）
-        self.risk_bar = RiskLevelBar()
-        risk_content_layout.addWidget(self.risk_bar)
-
-        # 容器
-        gauge_container = QWidget()
-        gauge_container.setLayout(risk_content_layout)
-        gauge_container.setStyleSheet("background: transparent; border: none;")
-
-        # 让整张卡更像你参考图：淡淡渐变底
-        risk_card = create_card(gauge_container, "风险指数评估")
-        # risk_card.setStyleSheet(f"""
-        # QFrame {{
-        #     background: qlineargradient(
-        #         x1:0, y1:0, x2:0, y2:1,
-        #         stop:0 #F4FBFC,
-        #         stop:1 #FFFFFF
-        #     );
-        #     border-radius: 18px;
-        #     border: 2px solid {CARD_BORDER};
-        # }}
-        # """)
-        self.content_layout.addWidget(risk_card)
-
-        # 2~4. 技术图表（仅专业版显示：ERP/频段/特征）
-        self.erp_widget = None
-        self.emotion_wave_canvas = None
-        self.feature_canvas = None
-        if self.mode == "professional":
-            # 2. ERP三联图
-            self.erp_widget = ERPTripleWidget()
-            self.content_layout.addWidget(create_card(self.erp_widget, "事件相关电位 (ERP) 分析"))
-            
-            # 3. 情绪波段分布（左图 + 右解释卡）
-            wave_box = QWidget()
-            wb_layout = QVBoxLayout(wave_box)
-            wb_layout.setContentsMargins(0, 0, 0, 0)
-            wb_layout.setSpacing(0)
-            
-            self.emotion_wave_canvas = RoundedBarCanvas(width=9, height=1.9)
-            wb_layout.addWidget(self.emotion_wave_canvas)
-            
-            wave_explain = ExplanationCard(
-                title="个性化解释",
-                body=(
-                    "该模块展示不同情绪刺激条件下（中性/负性/正性）脑电频带（δ/θ/α/β/γ）占比变化。"
-                    "若负性条件下β/γ比例偏高，可能提示紧张/警觉水平提升；若α比例偏低，可能提示放松度不足。"
-                    "建议结合近期睡眠、压力源与主观感受进行综合判断。"
-                ),
-                img_rel_path="assets/doctor.png"
-            )
-            
-            wave_two_col = TwoColumnModule(wave_box, wave_explain)
-            self.content_layout.addWidget(create_card(wave_two_col, "情绪状态脑波频带分布"))
-            
-            # 4. 特征分析（左图 + 右解释卡）
-            feat_box = QWidget()
-            fb_layout = QVBoxLayout(feat_box)
-            fb_layout.setContentsMargins(0, 0, 0, 0)
-            fb_layout.setSpacing(0)
-            
-            self.feature_canvas = RoundedBarCanvas(width=9, height=1.9)
-            fb_layout.addWidget(self.feature_canvas)
-            
-            feat_explain = ExplanationCard(
-                title="个性化解释",
-                body=(
-                    "该模块综合脑电信号提取出大脑活跃指数、情绪偏向指数与注意力集中度等特征。"
-                    "若活跃指数偏高可能提示认知负荷偏大；情绪偏向指数偏低可能提示负性倾向；"
-                    "注意力集中度偏低提示专注稳定性不足。建议结合行为表现与主观量表结果综合评估。"
-                ),
-                img_rel_path="assets/doctor.png"
-            )
-            
-            feat_two_col = TwoColumnModule(feat_box, feat_explain)
-            self.content_layout.addWidget(create_card(feat_two_col, "脑电特征指标分析"))
-
-        # 5. 结论
-        # 5. 结论（右侧加图：assets/8.png）
-        self.conclusion_text = QLabel()
-        self.conclusion_text.setWordWrap(True)
-        self.conclusion_text.setStyleSheet(f"""
-            font-size: 20px; line-height: 1.6; color: {TEXT_COLOR_SECONDARY};
-            padding: 5px; font-weight: 500; text-align: justify;
-        """)
-
-        conclusion_wrap = QWidget()
-        conclusion_wrap.setStyleSheet("background: transparent; border: none;")
-        conclusion_h = QHBoxLayout(conclusion_wrap)
-        conclusion_h.setContentsMargins(0, 0, 0, 0)
-        conclusion_h.setSpacing(14)
-
-        # 左：正文
-        self.conclusion_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        conclusion_h.addWidget(self.conclusion_text, 7)
-
-        # 右：图片（标题下方、正文右侧）
-        conclusion_img = QLabel()
-        conclusion_img.setStyleSheet("background: transparent; border: none;")
-        conclusion_img.setAlignment(Qt.AlignRight | Qt.AlignTop)
-        conclusion_img.setFixedSize(210, 160)  # 可调大小
-
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "8.png")
-        if os.path.exists(p):
-            pm = QPixmap(p)
-            if not pm.isNull():
-                pm = pm.scaled(conclusion_img.width(), conclusion_img.height(),
-                            Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                conclusion_img.setPixmap(pm)
-
-        conclusion_h.addWidget(conclusion_img, 3)
-
-        self.content_layout.addWidget(create_card(conclusion_wrap, "综合评估结论"))
-
-        # 5.5 风险告知与免责声明（客户版页尾必备，放在页尾横幅之前）
-        if self.disclaimer_widget is not None:
-            self.content_layout.addWidget(create_card(self.disclaimer_widget, "风险告知与免责声明"))
-
-        # —— 6. 页尾 Footer Banner（新增，不改原结论内容）——
-        self.footer_banner = FooterWidget(
-            bg_rel_path="assets/footer_bg.png",
-            headline_text="正向刺激投入度高",
-            desc_text="您的脑电表现显示，在积极情绪条件下注意力与投入度较高，具备良好的情绪调节与恢复能力。建议继续保持规律作息与适度运动，巩固积极状态。"
-        )
-
-        # 放在 content_container 之后：横向占满全宽，更像“页尾横幅”
-        self.main_layout.addWidget(self.footer_banner)
-
-        self.main_layout.addStretch()
-
-        wrapper = QWidget()
-        wrapper_layout = QVBoxLayout(wrapper)
-        wrapper_layout.setAlignment(Qt.AlignCenter)
-        wrapper_layout.addWidget(self.report_widget)
-        self.scroll_area.setWidget(wrapper)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.scroll_area)
-
-        # 底部按钮（保留两种版本导出）
+        # 按钮容器
         btn_bar = QWidget()
         btn_bar.setStyleSheet(f"background: white; border-top: 1px solid #ECF0F1;")
         bl = QHBoxLayout(btn_bar)
         bl.setContentsMargins(30, 15, 30, 15)
 
-        # 导出当前报告
         self.btn_export = QPushButton("导出用户版 PDF" if self.mode == "client" else "导出专业版 PDF")
         self.btn_export.setCursor(Qt.PointingHandCursor)
         self.btn_export.setStyleSheet(f"""
@@ -1990,7 +1705,6 @@ class MentalReportPage(QWidget):
         """)
         self.btn_export.clicked.connect(self.export_pdf)
 
-        # 便捷导出另一版本：仅在客户版展示（点击后进入专业版并触发导出）
         self.btn_export_other = QPushButton("导出专业版 PDF" if self.mode == "client" else "")
         self.btn_export_other.setCursor(Qt.PointingHandCursor)
         self.btn_export_other.setStyleSheet(f"""
@@ -2010,8 +1724,210 @@ class MentalReportPage(QWidget):
         bl.addWidget(self.btn_export_other)
         bl.addSpacing(12)
         bl.addWidget(self.btn_export)
-        layout.addWidget(btn_bar)
+        
+        # 组装主布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(self.scroll_area)
+        main_layout.addWidget(btn_bar)
 
+        # 初始化页面
+        self.pages = []
+        self._setup_pages()
+
+    def _setup_pages(self):
+        # 根据模式决定页数
+        total_pages = 2 if self.mode == "client" else 4
+        
+        # 报告画布容器
+        self.report_container = QWidget()
+        self.report_container_layout = QVBoxLayout(self.report_container)
+        self.report_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.report_container_layout.setSpacing(20) # 预览时页面间的间距
+        self.report_container_layout.setAlignment(Qt.AlignCenter)
+        
+        for i in range(total_pages):
+            p = ReportPage(i + 1, total_pages)
+            self.pages.append(p)
+            self.report_container_layout.addWidget(p)
+            
+            # 水印层（每页一个）
+            watermark = WatermarkOverlay(parent=p, opacity=0.15)
+            watermark.setGeometry(0, 0, A4_WIDTH, A4_HEIGHT)
+            watermark.lower()
+            
+        self.scroll_area.setWidget(self.report_container)
+        
+        # 填充内容
+        self._fill_content()
+
+    def _fill_content(self):
+        # 核心：清空之前的所有实例列表，防止分页/重构导致的 stale references (C++ object deleted)
+        self.all_summary_widgets.clear()
+        self.all_dep_widgets.clear()
+        self.all_anx_widgets.clear()
+        self.all_risk_bars.clear()
+        self.all_action_widgets.clear()
+        self.all_conclusion_labels.clear()
+        self.all_layered_widgets.clear()
+        self.all_erp_widgets.clear()
+        self.all_emotion_wave_canvases.clear()
+        self.all_feature_canvases.clear()
+        self.all_quality_widgets.clear()
+        # --- Page 1 ---
+        p1 = self.pages[0]
+        
+        # Header Overlay Stack
+        header_stack = QWidget()
+        header_stack.setFixedSize(A4_WIDTH, 500)
+        stack_layout = QStackedLayout(header_stack)
+        stack_layout.setStackingMode(QStackedLayout.StackAll)
+        
+        # 1. Header Background
+        self.header = HeaderWidget()
+        self.setup_header()
+        
+        # 2. Avatar
+        self.avatar_overlay = TopAvatarOverlay(avatar_h=120, left_margin=55, gap=50)
+        self.avatar_overlay.set_anchor_y(500 - 70)
+        
+        stack_layout.addWidget(self.avatar_overlay)
+        stack_layout.addWidget(self.header)
+        
+        p1.content_layout.addWidget(header_stack)
+        
+        # Content on Page 1
+        content_p1 = QWidget()
+        content_p1_v = QVBoxLayout(content_p1)
+        content_p1_v.setContentsMargins(30, -70, 30, 0) # 压住 header
+        content_p1_v.setSpacing(15)
+        
+        sw = ConclusionSummaryWidget()
+        self.all_summary_widgets.append(sw)
+        content_p1_v.addWidget(create_card(CardWithSideImage(sw, "assets/5.png"), "结论卡片（筛查提示）"))
+        
+        aw = ActionAdviceWidget()
+        self.all_action_widgets.append(aw)
+        content_p1_v.addWidget(create_card(CardWithSideImage(aw, "assets/6.png"), "行动建议"))
+        
+        self.help_widget = ProfessionalHelpWidget()
+        content_p1_v.addWidget(create_card(CardWithSideImage(self.help_widget, "assets/7.png"), "需要专业帮助的提示"))
+        
+        content_p1_v.addStretch(1)
+        p1.content_layout.addWidget(content_p1)
+        
+        # --- Page 2 ---
+        p2 = self.pages[1]
+        content_p2 = QWidget()
+        content_p2_v = QVBoxLayout(content_p2)
+        content_p2_v.setContentsMargins(30, 20, 30, 20)
+        content_p2_v.setSpacing(10)
+        
+        # Risk Index
+        dw = ScoreGaugeWidget()
+        aw = ScoreGaugeWidget()
+        rb = RiskLevelBar()
+        self.all_dep_widgets.append(dw)
+        self.all_anx_widgets.append(aw)
+        self.all_risk_bars.append(rb)
+        
+        risk_content = QVBoxLayout()
+        gauge_row = QHBoxLayout()
+        gauge_row.setSpacing(15)
+        
+        # 左侧装饰图
+        test_img = QLabel()
+        test_img.setFixedSize(160, 180) # 稍微减少高度以防截断
+        test_img.setAlignment(Qt.AlignCenter)
+        p_test = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "test.png")
+        if os.path.exists(p_test):
+            pm = QPixmap(p_test).scaled(test_img.width(), test_img.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            test_img.setPixmap(pm)
+        gauge_row.addWidget(test_img, 2)
+
+        def create_gauge_box(title, gauge):
+            box = QFrame()
+            box.setStyleSheet(f"background: rgba(255,255,255,0.85); border-radius: 18px; border: 1px solid {CARD_BORDER};")
+            v = QVBoxLayout(box)
+            v.setContentsMargins(5, 5, 5, 5) # 紧凑布局
+            bubble = InfoBubble(f"{title}")
+            v.addWidget(bubble, alignment=Qt.AlignCenter)
+            v.addWidget(gauge, alignment=Qt.AlignCenter)
+            return box
+
+        gauge_row.addWidget(create_gauge_box("抑郁指数", dw), 3)
+        gauge_row.addWidget(create_gauge_box("焦虑指数", aw), 3)
+        
+        risk_content.addLayout(gauge_row)
+        risk_content.addWidget(rb)
+        
+        risk_container = QWidget()
+        risk_container.setLayout(risk_content)
+        content_p2_v.addWidget(create_card(risk_container, "风险指数评估"))
+        
+        # Conclusion
+        cl = QLabel()
+        cl.setWordWrap(True)
+        cl.setStyleSheet(f"font-size: 20px; font-weight: 600; line-height: 1.5; color: {TEXT_COLOR_SECONDARY};")
+        self.all_conclusion_labels.append(cl)
+        content_p2_v.addWidget(create_card(CardWithSideImage(cl, "assets/8.png"), "综合评估结论"))
+        
+        # Disclaimer (Stay on Page 2 for user version)
+        self.disclaimer_widget = DisclaimerPrivacyWidget()
+        content_p2_v.addWidget(create_card(self.disclaimer_widget, "风险告知与免责声明"))
+        
+        # Footer Removed per user request
+        
+        content_p2_v.addStretch(1)
+        p2.content_layout.addWidget(content_p2)
+        
+        if self.mode == "professional":
+             # 专业版 Page 3: 技术指标 1
+             p3 = self.pages[2]
+             content_p3 = QWidget()
+             content_p3_v = QVBoxLayout(content_p3)
+             content_p3_v.setContentsMargins(30, 40, 30, 30)
+             content_p3_v.setSpacing(15)
+             
+             erp_w = ERPTripleWidget()
+             self.all_erp_widgets.append(erp_w)
+             content_p3_v.addWidget(create_card(erp_w, "事件相关电位 (ERP) 分析"))
+             
+             ewc = RoundedBarCanvas(width=9, height=2.0)
+             self.all_emotion_wave_canvases.append(ewc)
+             wave_explain = ExplanationCard(
+                title="个性化解释",
+                body=(
+                    "该模块展示不同情绪刺激条件下脑电频带分布。若负性条件下β/γ比例偏高，可能提示紧张水平提升。"
+                ),
+                img_rel_path="assets/doctor.png"
+             )
+             content_p3_v.addWidget(create_card(TwoColumnModule(ewc, wave_explain), "情绪状态脑波频带分布"))
+             content_p3_v.addStretch(1)
+             p3.content_layout.addWidget(content_p3)
+             
+             # 专业版 Page 4: 技术指标 2 + 免责
+             p4 = self.pages[3]
+             content_p4 = QWidget()
+             content_p4_v = QVBoxLayout(content_p4)
+             content_p4_v.setContentsMargins(30, 40, 30, 30)
+             content_p4_v.setSpacing(15)
+             
+             fc = RoundedBarCanvas(width=9, height=2.0)
+             self.all_feature_canvases.append(fc)
+             feat_explain = ExplanationCard(
+                title="个性化解释",
+                body=(
+                    "脑电信号提取出的大脑活跃度、情绪偏向与注意力。建议结合量表综合评估。"
+                ),
+                img_rel_path="assets/doctor.png"
+             )
+             content_p4_v.addWidget(create_card(TwoColumnModule(fc, feat_explain), "脑电特征指标分析"))
+             
+             # 在专业版，Page 2 的免责和 Footer 应该移到最后一页 (Page 4)
+             # 所以我们需要调整 Page 2 的内容，如果是在专业版模式下。
+             pass
 
     def setup_header(self):
         self.header = HeaderWidget()
@@ -2131,42 +2047,42 @@ class MentalReportPage(QWidget):
 
 
     def set_scores(self, s1, t1, s2, t2):
-        # 左右仪表盘：各自分数/标签
-        self.dep_widget.set_score(s1, t1)
-        self.anx_widget.set_score(s2, t2)
+        # 更新所有实例
+        for dw in self.all_dep_widgets: dw.set_score(s1, t1)
+        for aw in self.all_anx_widgets: aw.set_score(s2, t2)
 
-        # 风险条：取更高风险的一项（避免平均值掩盖风险）
+        # 风险条：取更高风险的一项
         risk_score = max(float(s1), float(s2))
-        self.risk_bar.set_value(risk_score)
+        for rb in self.all_risk_bars: rb.set_value(risk_score)
 
         self.scores_data = {'depression': float(s1), 'anxiety': float(s2)}
 
-        # 客户版置顶结论卡：随分数自动刷新
-        if self.summary_widget is not None:
-            self.summary_widget.set_scores(float(s1), float(s2))
+        # 客户版置顶结论卡
+        for sw in self.all_summary_widgets:
+            sw.set_scores(float(s1), float(s2))
 
-        # 行动建议：随风险档位刷新（≤3条）
-        if self.action_widget is not None:
-            self.action_widget.set_by_risk(risk_score)
+        # 行动建议
+        for acw in self.all_action_widgets:
+            acw.set_by_risk(risk_score)
 
     def set_erp_data(self, neutral, positive, negative):
-        if self.erp_widget is None:
-            return
-        self.erp_widget.update_data(neutral, positive, negative)
+        for w in self.all_erp_widgets:
+            w.update_data(neutral, positive, negative)
+            w.plot_all()
 
     def set_emotion_wave_data(self, n, neg, pos):
-        if self.emotion_wave_canvas is not None:
-            self.emotion_wave_canvas.plot_emotion_waves(n, neg, pos)
         self.emotion_wave_data = {'neutral': n, 'negative': neg, 'positive': pos}
+        for c in self.all_emotion_wave_canvases:
+            c.plot_emotion_waves(n, neg, pos)
 
     def set_feature_data(self, brain_activity, emotion_bias, attention_concentration):
-        if self.feature_canvas is not None:
-            self.feature_canvas.plot_feature_bars(brain_activity, emotion_bias, attention_concentration)
         self.feature_values = {
             'brain_activity': brain_activity,
             'emotion_bias': emotion_bias,
             'attention_concentration': attention_concentration
         }
+        for c in self.all_feature_canvases:
+            c.plot_feature_bars(brain_activity, emotion_bias, attention_concentration)
 
     def generate_auto_conclusion(self):
         if not all([self.scores_data, self.feature_values, self.emotion_wave_data]):
@@ -2183,17 +2099,17 @@ class MentalReportPage(QWidget):
 
         # 4级判断逻辑
         if avg < 50:
-            risk = "正常"
-            status_desc = "整体心理状态平稳，情绪波动在正常范围内。"
+            risk = "无风险"
+            status_desc = "整体心理状态平稳，处于健康范围内。"
         elif avg < 65:
             risk = "轻度风险"
-            status_desc = "存在轻微的心理压力，建议适当放松心情，注意劳逸结合。"
+            status_desc = "存在轻微的心理压力或波动，建议增加休息，注意劳逸结合。"
         elif avg < 75:
             risk = "中度风险"
-            status_desc = "存在一定的心理困扰，建议积极关注情绪变化，必要时向亲友倾诉。"
+            status_desc = "存在一定的心理风险信号，建议主动进行压力调节，必要时寻求专业咨询。"
         else:
             risk = "重度风险"
-            status_desc = "心理压力较大，情绪状态不稳定，强烈建议寻求专业心理咨询支持。"
+            status_desc = "心理风险信号显著，强烈建议尽快寻求专业评估与支持。"
 
         text = f"综合评估结果显示，受测者的当前心理健康风险处于{risk}水平。抑郁指数为{dep}分，焦虑指数为{anx}分。{status_desc}"
 
@@ -2224,7 +2140,8 @@ class MentalReportPage(QWidget):
         return text
 
     def set_conclusion(self, t):
-        self.conclusion_text.setText(t)
+        for cl in self.all_conclusion_labels:
+            cl.setText(t)
 
 
     def _request_professional_export(self):
@@ -2243,11 +2160,12 @@ class MentalReportPage(QWidget):
             pass
         super().closeEvent(event)
 
-    def export_pdf(self):
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "导出报告",
-            ("心理健康评估报告-用户版.pdf" if self.mode == "client" else "心理健康评估报告-专业版.pdf"), "PDF Files (*.pdf)"
-            )
+    def export_pdf(self, filename=None):
+        if not filename:
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "导出报告",
+                ("心理健康评估报告-用户版.pdf" if self.mode == "client" else "心理健康评估报告-专业版.pdf"), "PDF Files (*.pdf)"
+                )
         if not filename:
             return
 
@@ -2256,25 +2174,31 @@ class MentalReportPage(QWidget):
             printer.setOutputFormat(QPrinter.PdfFormat)
             printer.setPageSize(QPrinter.A4)
             printer.setOutputFileName(filename)
-
             printer.setPageMargins(0, 0, 0, 0, QPrinter.Millimeter)
 
             painter = QPainter(printer)
-
-            pixmap = self.report_widget.grab()
-
-            rect = printer.pageRect()
-            scaled_pixmap = pixmap.scaled(rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-            x = int((rect.width() - scaled_pixmap.width()) / 2)
-            y = int((rect.height() - scaled_pixmap.height()) / 2)
-
-            painter.drawPixmap(x, y, scaled_pixmap)
+            
+            # 渲染每一页
+            for i, page in enumerate(self.pages):
+                if i > 0:
+                    printer.newPage()
+                
+                # 抓取页面
+                pixmap = page.grab()
+                
+                rect = printer.pageRect()
+                # 保持比例充满页面
+                scaled_pixmap = pixmap.scaled(rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                
+                x = int((rect.width() - scaled_pixmap.width()) / 2)
+                y = int((rect.height() - scaled_pixmap.height()) / 2)
+                
+                painter.drawPixmap(x, y, scaled_pixmap)
 
             painter.end()
 
             print(f"导出成功: {filename}")
-            QMessageBox.information(self, "成功", "PDF 报告导出成功！")
+            # QMessageBox.information(self, "成功", "PDF 报告导出成功！")
             # 通知主流程：已导出
             try:
                 self.flow_finished.emit("exported")

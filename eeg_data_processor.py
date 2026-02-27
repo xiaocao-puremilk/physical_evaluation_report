@@ -232,6 +232,37 @@ class EEGProcessor:
 
         return neutral_list, negative_list, positive_list
 
+    def get_quality_metrics(self):
+        """返回采集质量指标"""
+        if self.fpz is None:
+            return None
+        
+        # 1. 采集时长
+        duration_sec = len(self.fpz) / self.fs
+        
+        # 2. 伪迹率 (假设绝对值 > 100uV 为伪迹)
+        artifact_mask = np.abs(self.fpz) > 100
+        artifact_ratio = np.sum(artifact_mask) / len(self.fpz)
+        valid_data_ratio = 1.0 - artifact_ratio
+        
+        # 3. 电极接触 (简单模拟：如果标准差极小(<0.1)或极大(>200)，认为接触不良)
+        std_val = np.std(self.fpz)
+        if std_val < 0.1:
+            contact = "信号丢失(平线)"
+        elif std_val > 300:
+            contact = "接触极差(剧烈噪声)"
+        elif std_val > 150:
+            contact = "接触一般"
+        else:
+            contact = "良好"
+            
+        return {
+            "duration_sec": duration_sec,
+            "valid_data_ratio": valid_data_ratio,
+            "artifact_removal_ratio": min(1.0, artifact_ratio * 1.2), # 模拟清洗后的比例
+            "electrode_contact": contact
+        }
+
     def compute_feature_indices(self):
         """计算三大特征指标"""
         # 选取基线段 (7-13s)

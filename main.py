@@ -62,6 +62,19 @@ def populate_report(page, processor, person_info, scores, erp_lists, band_lists,
     except Exception:
         pass
 
+    # 采集质量 (专业版)
+    try:
+        q = processor.get_quality_metrics()
+        if q and hasattr(page, "set_quality_data"):
+            page.set_quality_data(
+                q["duration_sec"],
+                q["valid_data_ratio"],
+                q["artifact_removal_ratio"],
+                q["electrode_contact"]
+            )
+    except Exception:
+        pass
+
     # 结论
     try:
         auto_conclusion = page.generate_auto_conclusion()
@@ -97,16 +110,6 @@ def main():
     # =========================
     # 预先计算一次数据，供两份报告复用
     # =========================
-    # 分数（示例：可替换为你们的算法输出）
-    depression_score = 58
-    anxiety_score = 45
-
-    scores = {
-        "depression_score": depression_score,
-        "depression_tag": "中度风险" if depression_score >= 45 else "正常范围",
-        "anxiety_score": anxiety_score,
-        "anxiety_tag": "中度风险" if anxiety_score >= 45 else "正常范围",
-    }
 
     # 默认值（没有 meta.json 也能跑）
     person_info = {
@@ -152,6 +155,8 @@ def main():
     except Exception as e:
         print(f"[WARN] ERP 计算失败: {e}")
         erp_lists = ([0]*1500, [0]*1500, [0]*1500)
+    finally:
+        print(f"[DEBUG] ERP 数据长度: {[len(x) for x in erp_lists]}")
 
     # 频带分布
     try:
@@ -170,6 +175,28 @@ def main():
     except Exception as e:
         print(f"[WARN] 特征指标计算失败: {e}")
         feature_values = (0.5, 0.5, 0.5)
+        brain_activity, emotion_bias, attention_concentration = feature_values
+
+    # =========================
+    # 2) 计算得分（从分析结果推导，不再 hardcode）
+    # =========================
+    # 算法示例：抑郁风险与活跃度负相关，与负面偏向正相关
+    depression_score = int(np.clip((1.0 - brain_activity) * 60 + (1.0 - emotion_bias) * 40, 20, 95))
+    # 焦虑风险与注意力/稳定性相关
+    anxiety_score = int(np.clip((1.0 - attention_concentration) * 50 + (brain_activity) * 50, 20, 95))
+
+    def _get_tag(s):
+        if s >= 75: return "重度风险"
+        if s >= 65: return "中度风险"
+        if s >= 50: return "轻度风险"
+        return "正常范围"
+
+    scores = {
+        "depression_score": depression_score,
+        "depression_tag": _get_tag(depression_score),
+        "anxiety_score": anxiety_score,
+        "anxiety_tag": _get_tag(anxiety_score),
+    }
 
     # =========================
     # 1) 先展示客户版
