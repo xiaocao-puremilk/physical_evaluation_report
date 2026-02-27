@@ -1,0 +1,8 @@
+{
+    "files": [
+        "20251216_H_2_s.csv",
+        "eeg_data_processor.py",
+        "main.py",
+        "report_ui.py"
+    ]
+}
