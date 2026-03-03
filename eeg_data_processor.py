@@ -264,7 +264,7 @@ class EEGProcessor:
         }
 
     def compute_feature_indices(self):
-        """计算三大特征指标"""
+        """计算三大特征指标 (脑电特征指标分析专用)"""
         # 选取基线段 (7-13s)
         start_idx = int(7 * self.fs)
         end_idx = int(13 * self.fs)
@@ -286,23 +286,25 @@ class EEGProcessor:
 
         # 1. 情绪偏向 (Frontal Alpha Asymmetry)
         # FAA = ln(Right) - ln(Left)
+        # 注意：Alpha能量越高代表该区越不活跃。FAA > 0 表示右侧Alpha高（右侧不活跃，左侧活跃），通常代表积极偏向。
         if alpha_left > 0 and alpha_right > 0:
-            faa = np.log(alpha_right) - np.log(alpha_left)
-            emotion_bias = 1 / (1 + np.exp(-4 * faa)) # Sigmoid 映射到 0-1
+            faa_val = np.log(alpha_right) - np.log(alpha_left)
+            # 这里的 emotion_bias 我们将其线性化到 0-1 范围，0.5代表平衡
+            # 常见 FAA 范围在 -1.0 到 1.0 之间，使用 tanh 或 clip 缩放
+            emotion_bias = np.clip((faa_val + 0.5) / 1.0, 0.0, 1.0)
         else:
             emotion_bias = 0.5
 
         # 2. 大脑活跃指数 ((Beta+Gamma)/Total)
-        # Total 从 2Hz 开始 (配合 Delta 的调整)
         total_p = self.calculate_band_power_from_psd(freqs_z, psd_z, 2, 45)
         active_p = self.calculate_band_power_from_psd(freqs_z, psd_z, 13, 45)
 
         if total_p > 0:
             ratio = active_p / total_p
-            # 活跃度通常较低，乘以系数让其在图表上好看些
-            brain_activity = np.clip(ratio * 2.5, 0.1, 1.0)
+            # 针对体检人群通常在 0.1 - 0.4 之间。映射到 0-1
+            brain_activity = np.clip(ratio * 3.0, 0.0, 1.0)
         else:
-            brain_activity = 0.1
+            brain_activity = 0.2
 
         # 3. 注意力集中度 (Beta/Theta)
         theta_p = self.calculate_band_power_from_psd(freqs_z, psd_z, 4, 8)
@@ -310,8 +312,8 @@ class EEGProcessor:
 
         if theta_p > 0:
             tbr = beta_p / theta_p
-            # TBR 正常范围通常在 0.5 - 1.5
-            attention_concentration = np.clip(tbr / 2.0, 0.1, 1.0)
+            # TBR 通常在 0.5 - 2.5 之间。映射到 0-1
+            attention_concentration = np.clip(tbr / 2.5, 0.0, 1.0)
         else:
             attention_concentration = 0.5
 

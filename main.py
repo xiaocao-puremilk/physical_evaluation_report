@@ -5,6 +5,7 @@ import json
 import os
 import argparse
 import numpy as np
+import pandas as pd
 
 import PyQt5
 qt_dir = os.path.dirname(PyQt5.__file__)
@@ -20,6 +21,24 @@ from report_ui import MentalReportPage
 from report_ui_pro import ProfessionalReportPage
 from eeg_data_processor import EEGProcessor
 
+def load_algorithm_config(csv_path):
+    """从CSV加载算法配置权重"""
+    try:
+        df = pd.read_csv(csv_path)
+        config = {}
+        for _, row in df.iterrows():
+            config[row['index_name']] = {
+                'weight_activity': float(row['weight_activity']),
+                'weight_bias': float(row['weight_bias']),
+                'weight_attention': float(row['weight_attention']),
+                'offset': float(row['offset']),
+                'min_score': float(row['min_score']),
+                'max_score': float(row['max_score'])
+            }
+        return config
+    except Exception as e:
+        print(f"[WARN] 无法加载算法配置 {csv_path}: {e}。将使用默认内置逻辑。")
+        return None
 
 def populate_report(page, processor, person_info, scores, erp_lists, band_lists, feature_values):
     # 个人信息
@@ -180,10 +199,31 @@ def main():
     # =========================
     # 2) 计算得分（从分析结果推导，不再 hardcode）
     # =========================
-    # 算法示例：抑郁风险与活跃度负相关，与负面偏向正相关
-    depression_score = int(np.clip((1.0 - brain_activity) * 60 + (1.0 - emotion_bias) * 40, 20, 95))
-    # 焦虑风险与注意力/稳定性相关
-    anxiety_score = int(np.clip((1.0 - attention_concentration) * 50 + (brain_activity) * 50, 20, 95))
+    config_path = "algorithm_config.csv"
+    algo_config = load_algorithm_config(config_path)
+
+    if algo_config:
+        # 使用配置文件的线性加权算法
+        print(f"[OK] 使用来自 {config_path} 的自定义算法配置")
+        
+        d_cfg = algo_config['depression']
+        depression_val = (d_cfg['weight_activity'] * brain_activity + 
+                          d_cfg['weight_bias'] * emotion_bias + 
+                          d_cfg['weight_attention'] * attention_concentration + 
+                          d_cfg['offset'])
+        depression_score = int(np.clip(depression_val, d_cfg['min_score'], d_cfg['max_score']))
+
+        a_cfg = algo_config['anxiety']
+        anxiety_val = (a_cfg['weight_activity'] * brain_activity + 
+                       a_cfg['weight_bias'] * emotion_bias + 
+                       a_cfg['weight_attention'] * attention_concentration + 
+                       a_cfg['offset'])
+        anxiety_score = int(np.clip(anxiety_val, a_cfg['min_score'], a_cfg['max_score']))
+    else:
+        # 兜底默认算法：抑郁风险与活跃度负相关，与负面偏向正相关
+        depression_score = int(np.clip((1.0 - brain_activity) * 60 + (1.0 - emotion_bias) * 40, 20, 95))
+        # 焦虑风险与注意力/稳定性负相关，与活跃度正相关
+        anxiety_score = int(np.clip((1.0 - attention_concentration) * 50 + (brain_activity) * 50, 20, 95))
 
     def _get_tag(s):
         if s >= 75: return "重度风险"
