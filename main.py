@@ -265,24 +265,49 @@ def main():
         print("[Main] 全流程完成，程序即将退出。")
         QTimer.singleShot(2000, app.quit)
 
-    def do_upload_and_sync(filename, p_info, next_step=None):
-        """执行上传并在完成后执行下一步回调"""
-        print(f"[Main] 准备上传: {filename}")
-        # 包装一下上传逻辑，确保在主线程异步执行不阻塞 UI
+    # 收集两份上传结果，最后统一通知平台3
+    upload_results = {"client": None, "pro": None}
+
+    def do_final_notify():
+        """两份都上传完后，统一通知平台3"""
+        client_res = upload_results.get("client")
+        pro_res = upload_results.get("pro")
+        if client_res:
+            from cloud_services import Platform3Notifier
+            notifier = Platform3Notifier()
+            folder = f"reports/{csv_basename}"
+            sync_res = notifier.notify_success(
+                person_info, client_res,
+                oss_result_pro=pro_res,
+                oss_folder=folder
+            )
+            print(f"[Main] 平台3同步结果: {json.dumps(sync_res, ensure_ascii=False)}")
+        on_all_finished()
+
+    def do_upload_and_sync(filename, p_info, report_type="client", next_step=None):
+        """执行上传，结果保存到 upload_results，完成后执行 next_step"""
+        print(f"[Main] 准备上传 ({report_type}): {filename}")
         def _run():
-            res = handle_upload_and_notify(filename, p_info, is_prod=False, folder_prefix=csv_basename)
-            print(f"[Main] 流程结果: {json.dumps(res, ensure_ascii=False)}")
+            res = handle_upload_and_notify.__wrapped__(filename, p_info, is_prod=False, folder_prefix=csv_basename) \
+                if hasattr(handle_upload_and_notify, '__wrapped__') \
+                else _upload_only(filename, p_info)
+            upload_results[report_type] = res
+            print(f"[Main] 上传结果 ({report_type}): {json.dumps(res, ensure_ascii=False)}")
             if next_step:
                 QTimer.singleShot(500, next_step)
-        
-        # 延迟 1 秒确保文件写入磁盘完成
         QTimer.singleShot(1000, _run)
+
+    def _upload_only(filename, p_info):
+        """只做 OSS 上传，不做通知（最后统一通知）"""
+        from cloud_services import AliyunOSSUploader
+        uploader = AliyunOSSUploader(is_prod=False)
+        return uploader.upload_pdf(filename, person_info=p_info, folder_prefix=csv_basename)
 
     def show_professional_auto():
         if state["professional_shown"]:
             return
         state["professional_shown"] = True
-        
+
         print("[Main] 自动启动专业版生成...")
         pro_page = ProfessionalReportPage(mode="professional")
         populate_report(pro_page, processor, person_info, scores, erp_lists, band_lists, feature_values)
@@ -290,26 +315,35 @@ def main():
 
         def on_pro_finished(reason, filename):
             if reason == "exported":
-                do_upload_and_sync(filename, person_info, next_step=on_all_finished)
+                # 上传专业版，完成后统一通知平台3
+                def _upload_pro():
+                    res = _upload_only(filename, person_info)
+                    upload_results["pro"] = res
+                    print(f"[Main] 专业版上传结果: {json.dumps(res, ensure_ascii=False)}")
+                    QTimer.singleShot(500, do_final_notify)
+                QTimer.singleShot(1000, _upload_pro)
             elif reason == "closed":
-                on_all_finished()
+                do_final_notify()
 
         pro_page.flow_finished.connect(on_pro_finished)
         pro_page.show()
-        # 自动触发专业版导出，直接传入路径不再弹窗
         QTimer.singleShot(1000, lambda: pro_page.export_pdf(pro_pdf_path))
 
     def on_client_finished(reason, filename):
         if reason == "exported":
-            # 客户版导出成功，先上传，上传完开专业版
-            do_upload_and_sync(filename, person_info, next_step=show_professional_auto)
+            # 上传用户版，完成后开启专业版
+            def _upload_client():
+                res = _upload_only(filename, person_info)
+                upload_results["client"] = res
+                print(f"[Main] 用户版上传结果: {json.dumps(res, ensure_ascii=False)}")
+                QTimer.singleShot(500, show_professional_auto)
+            QTimer.singleShot(1000, _upload_client)
         elif reason == "closed":
             show_professional_auto()
 
     client_page.flow_finished.connect(on_client_finished)
     client_page.show()
 
-    # 自动触发客户版导出，直接传入路径不再弹窗
     print(f"[Main] 开始自动导出客户版 PDF: {client_pdf_path}")
     QTimer.singleShot(1000, lambda: client_page.export_pdf(client_pdf_path))
 

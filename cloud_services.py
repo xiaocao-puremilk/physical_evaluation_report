@@ -121,9 +121,12 @@ class Platform3Notifier:
     def __init__(self, domain="https://ciming.pages.dev"):
         self.api_url = f"{domain}/api/sync-record"
 
-    def notify_success(self, person_info, oss_result):
+    def notify_success(self, person_info, oss_result, oss_result_pro=None, oss_folder=None):
         """
         通知平台 3 同步数据
+        oss_result: 用户版 OSS 上传结果
+        oss_result_pro: 专业版 OSS 上传结果 (可选)
+        oss_folder: OSS 文件夹前缀 (csv_basename), 如 "reports/20251216_H_2_s"
         """
         if oss_result.get("code") != "000000":
             return {"code": "error", "msg": "OSS 上传未成功，跳过通知平台 3"}
@@ -136,8 +139,13 @@ class Platform3Notifier:
             "department": person_info.get("location", "体检中心"),
             "status": "已完成",
             "ossKey": oss_result.get("data", {}).get("key"),
-            "number": person_info.get("report_id")
+            "number": person_info.get("report_id"),
+            "ossFolder": oss_folder or f"reports/{person_info.get('report_id', 'unknown')}",
         }
+
+        # 如果专业版上传成功，追加专业版 key
+        if oss_result_pro and oss_result_pro.get("code") == "000000":
+            data["ossKeyPro"] = oss_result_pro.get("data", {}).get("key")
 
         try:
             print("-" * 40)
