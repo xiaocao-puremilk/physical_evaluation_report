@@ -20,6 +20,7 @@ from PyQt5.QtCore import QTimer
 from report_ui import MentalReportPage
 from report_ui_pro import ProfessionalReportPage
 from eeg_data_processor import EEGProcessor
+from cloud_services import handle_upload_and_notify
 
 def load_algorithm_config(csv_path):
     """从CSV加载算法配置权重"""
@@ -152,7 +153,7 @@ def main():
             if isinstance(meta, dict):
                 # 只覆盖我们需要的字段，避免 JSON 里多字段影响
                 for k in [
-                    "name", "age", "report_id", "location",
+                    "name", "gender", "age", "person_id", "report_id", "location",
                     "collect_dt", "gen_dt", "device_ver", "operator"
                 ]:
                     if k in meta and meta[k] not in (None, ""):
@@ -239,42 +240,79 @@ def main():
     }
 
     # =========================
+    # 0) 准备导出目录
+    # =========================
+    # 根据 CSV 文件名创建子文件夹，例如 report/20251216_H_2_s/
+    csv_basename = os.path.splitext(os.path.basename(eeg_file_path))[0]
+    subject_report_dir = os.path.join("report", csv_basename)
+    if not os.path.exists(subject_report_dir):
+        os.makedirs(subject_report_dir)
+        print(f"[Main] 已创建被试者报告目录: {subject_report_dir}")
+
+    client_pdf_path = os.path.join(subject_report_dir, "心理健康评估报告-用户版.pdf")
+    pro_pdf_path = os.path.join(subject_report_dir, "心理健康评估报告-专业版.pdf")
+
+    # =========================
     # 1) 先展示客户版
     # =========================
     client_page = MentalReportPage(mode="client")
     populate_report(client_page, processor, person_info, scores, erp_lists, band_lists, feature_values)
 
-    state = {"professional_shown": False, "auto_export_professional": False}
+    state = {"professional_shown": False}
     professional_page_holder = {"page": None}
 
-    def show_professional(auto_export=False):
+    def on_all_finished():
+        print("[Main] 全流程完成，程序即将退出。")
+        QTimer.singleShot(2000, app.quit)
+
+    def do_upload_and_sync(filename, p_info, next_step=None):
+        """执行上传并在完成后执行下一步回调"""
+        print(f"[Main] 准备上传: {filename}")
+        # 包装一下上传逻辑，确保在主线程异步执行不阻塞 UI
+        def _run():
+            res = handle_upload_and_notify(filename, p_info, is_prod=False, folder_prefix=csv_basename)
+            print(f"[Main] 流程结果: {json.dumps(res, ensure_ascii=False)}")
+            if next_step:
+                QTimer.singleShot(500, next_step)
+        
+        # 延迟 1 秒确保文件写入磁盘完成
+        QTimer.singleShot(1000, _run)
+
+    def show_professional_auto():
         if state["professional_shown"]:
             return
         state["professional_shown"] = True
-        state["auto_export_professional"] = auto_export
-
+        
+        print("[Main] 自动启动专业版生成...")
         pro_page = ProfessionalReportPage(mode="professional")
         populate_report(pro_page, processor, person_info, scores, erp_lists, band_lists, feature_values)
         professional_page_holder["page"] = pro_page
 
-        # 专业版关闭则退出
-        pro_page.flow_finished.connect(lambda reason: app.quit() if reason == "closed" else None)
+        def on_pro_finished(reason, filename):
+            if reason == "exported":
+                do_upload_and_sync(filename, person_info, next_step=on_all_finished)
+            elif reason == "closed":
+                on_all_finished()
 
+        pro_page.flow_finished.connect(on_pro_finished)
         pro_page.show()
+        # 自动触发专业版导出，直接传入路径不再弹窗
+        QTimer.singleShot(1000, lambda: pro_page.export_pdf(pro_pdf_path))
 
-        if auto_export:
-            QTimer.singleShot(350, pro_page.export_pdf)
+    def on_client_finished(reason, filename):
+        if reason == "exported":
+            # 客户版导出成功，先上传，上传完开专业版
+            do_upload_and_sync(filename, person_info, next_step=show_professional_auto)
+        elif reason == "closed":
+            show_professional_auto()
 
-    def on_client_flow(reason: str):
-        # 客户版导出/关闭 -> 打开专业版
-        if reason in ("exported", "closed"):
-            show_professional(auto_export=False)
-        elif reason == "open_professional_export":
-            show_professional(auto_export=True)
-
-    client_page.flow_finished.connect(on_client_flow)
-
+    client_page.flow_finished.connect(on_client_finished)
     client_page.show()
+
+    # 自动触发客户版导出，直接传入路径不再弹窗
+    print(f"[Main] 开始自动导出客户版 PDF: {client_pdf_path}")
+    QTimer.singleShot(1000, lambda: client_page.export_pdf(client_pdf_path))
+
     sys.exit(app.exec_())
 
 

@@ -1,6 +1,8 @@
 {
   "name": "王五",
+  "gender": "男",
   "age": "24岁",
+  "person_id": "110101199001011234",
   "report_id": "A002",
   "location": "A体检中心",
   "collect_dt": "2026-01-03 11:30",

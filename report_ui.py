@@ -1648,7 +1648,7 @@ class WatermarkOverlay(QWidget):
             yy += step_y
 
 class MentalReportPage(QWidget):
-    flow_finished = pyqtSignal(str)  # 'exported' or 'closed'
+    flow_finished = pyqtSignal(str, str)  # reason ('exported' or 'closed'), filename (if exported)
 
     def __init__(self, mode="client"):
         super().__init__()
@@ -2147,7 +2147,7 @@ class MentalReportPage(QWidget):
     def _request_professional_export(self):
         # 客户版：用户点击“导出专业版 PDF”，交给 main.py 打开专业版并触发导出
         try:
-            self.flow_finished.emit("open_professional_export")
+            self.flow_finished.emit("open_professional_export", "")
         except Exception:
             pass
         self.close()
@@ -2155,13 +2155,14 @@ class MentalReportPage(QWidget):
     def closeEvent(self, event):
         # 通知主流程：窗口被关闭
         try:
-            self.flow_finished.emit("closed")
+            self.flow_finished.emit("closed", "")
         except Exception:
             pass
         super().closeEvent(event)
 
     def export_pdf(self, filename=None):
         if not filename:
+            from PyQt5.QtWidgets import QFileDialog
             filename, _ = QFileDialog.getSaveFileName(
                 self, "导出报告",
                 ("心理健康评估报告-用户版.pdf" if self.mode == "client" else "心理健康评估报告-专业版.pdf"), "PDF Files (*.pdf)"
@@ -2199,9 +2200,9 @@ class MentalReportPage(QWidget):
 
             print(f"导出成功: {filename}")
             # QMessageBox.information(self, "成功", "PDF 报告导出成功！")
-            # 通知主流程：已导出
+            # 通知主流程：已导出并携带文件名
             try:
-                self.flow_finished.emit("exported")
+                self.flow_finished.emit("exported", filename)
             except Exception:
                 pass
 
