@@ -117,8 +117,14 @@ class AliyunOSSUploader:
 class Platform3Notifier:
     """
     平台 3 (Cloudflare D1) 同步服务类
+    设置环境变量 USE_LOCAL_SERVER=1 可切换到本地 Wrangler (http://localhost:8787) 进行调试
     """
-    def __init__(self, domain="https://ciming.pages.dev"):
+    def __init__(self):
+        if os.getenv("USE_LOCAL_SERVER") == "1":
+            domain = "http://localhost:8787"
+            print("[Platform3] 使用本地 Wrangler (http://localhost:8787)")
+        else:
+            domain = "https://ciming.pages.dev"
         self.api_url = f"{domain}/api/sync-record"
 
     def notify_success(self, person_info, oss_result, oss_result_pro=None, oss_folder=None):
@@ -132,7 +138,11 @@ class Platform3Notifier:
             return {"code": "error", "msg": "OSS 上传未成功，跳过通知平台 3"}
 
         data = {
-            "personId": person_info.get("personId") or person_info.get("person_id"),
+            "personId": (
+                person_info.get("personId")
+                or person_info.get("person_id")
+                or person_info.get("report_id")  # 最后备选：用报告编号作为 ID
+            ),
             "name": person_info.get("name"),
             "gender": person_info.get("gender", "男"),
             "age": str(person_info.get("age", "")).replace("岁", ""),

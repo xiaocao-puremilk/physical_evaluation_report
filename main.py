@@ -272,16 +272,24 @@ def main():
         """两份都上传完后，统一通知平台3"""
         client_res = upload_results.get("client")
         pro_res = upload_results.get("pro")
-        if client_res:
+        print("=" * 60)
+        print(f"[DEBUG] do_final_notify 触发")
+        print(f"[DEBUG] upload_results['client'] = {json.dumps(client_res, ensure_ascii=False) if client_res else 'None'}")
+        print(f"[DEBUG] upload_results['pro']    = {json.dumps(pro_res, ensure_ascii=False) if pro_res else 'None'}")
+        print("=" * 60)
+        if client_res and client_res.get("code") == "000000":
             from cloud_services import Platform3Notifier
             notifier = Platform3Notifier()
             folder = f"reports/{csv_basename}"
+            print(f"[DEBUG] 准备同步到平台3，folder={folder}")
             sync_res = notifier.notify_success(
                 person_info, client_res,
                 oss_result_pro=pro_res,
                 oss_folder=folder
             )
             print(f"[Main] 平台3同步结果: {json.dumps(sync_res, ensure_ascii=False)}")
+        else:
+            print(f"[WARN] 用户版上传结果无效或为 None，跳过平台3同步！")
         on_all_finished()
 
     def do_upload_and_sync(filename, p_info, report_type="client", next_step=None):
