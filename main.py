@@ -133,9 +133,10 @@ def main():
 
     # 默认值（没有 meta.json 也能跑）
     person_info = {
+        "person_id": "110101199001011234",  # 与平台3前端 mock 身份证号对应
         "name": "张三",
         "age": "25岁",
-        "report_id": "A001",
+        "report_id": "A003",
         "location": "A体检中心",
         "collect_dt": "2026-01-03 10:30",
         "gen_dt": "2026-01-03 11:10",

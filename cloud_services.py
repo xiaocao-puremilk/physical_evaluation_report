@@ -69,7 +69,11 @@ class AliyunOSSUploader:
                 print(f"[OSS] 正在上传 (尝试 {attempt + 1}): {file_path}")
                 print(f"[OSS] 目标路径: {object_key}")
 
-                result = self.bucket.put_object_from_file(object_key, file_path)
+                result = self.bucket.put_object_from_file(
+                    object_key, 
+                    file_path,
+                    headers={'Content-Type': 'application/pdf'}
+                )
 
                 if result.status == 200:
                     encoded_key = urllib.parse.quote(object_key)
