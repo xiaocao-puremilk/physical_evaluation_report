@@ -332,7 +332,7 @@ def main():
         """执行上传，结果保存到 upload_results，完成后执行 next_step"""
         print(f"[Main] 准备上传 ({report_type}): {filename}")
         def _run():
-            res = handle_upload_and_notify.__wrapped__(filename, p_info, is_prod=False, folder_prefix=csv_basename) \
+            res = handle_upload_and_notify.__wrapped__(filename, p_info, folder_prefix=csv_basename) \
                 if hasattr(handle_upload_and_notify, '__wrapped__') \
                 else _upload_only(filename, p_info)
             upload_results[report_type] = res
@@ -344,7 +344,7 @@ def main():
     def _upload_only(filename, p_info):
         """只做 OSS 上传，不做通知（最后统一通知）"""
         from cloud_services import AliyunOSSUploader
-        uploader = AliyunOSSUploader(is_prod=False)
+        uploader = AliyunOSSUploader()
         return uploader.upload_pdf(filename, person_info=p_info, folder_prefix=csv_basename)
 
     def show_professional_auto():

@@ -3,6 +3,7 @@ import json
 import urllib.parse
 from datetime import datetime
 from dotenv import load_dotenv
+import time
 
 import requests
 import oss2
@@ -14,108 +15,168 @@ class AliyunOSSUploader:
     """
     阿里云 OSS 上传服务类
     说明：
-    - 这里改成“直传你自己的阿里云 OSS”
-    - 不再调用对方 /file-svc/api/file/uploadFileByRole
-    - 返回结构尽量兼容旧逻辑，方便后续 Platform3Notifier 继续使用 oss_result["data"]["key"]
+    - 调用对方 /file-svc/api/file/uploadFileByRole 接口上传文件
+    - 维持原有的返回值结构，方便后续 Platform3Notifier 继续使用 oss_result["data"]["key"]
     """
 
-    def __init__(self, is_prod=False):
-        # 从环境变量读取配置
-        self.endpoint = os.getenv("OSS_ENDPOINT", "https://oss-cn-beijing.aliyuncs.com")
-        self.bucket_name = os.getenv("OSS_BUCKET_NAME", "ciming-data-test-oss")
-        self.access_key_id = os.getenv("OSS_ACCESS_KEY_ID")
-        self.access_key_secret = os.getenv("OSS_ACCESS_KEY_SECRET")
-
-        if not self.access_key_id or not self.access_key_secret:
-            raise ValueError("未在 .env 中找到 OSS_ACCESS_KEY_ID 或 OSS_ACCESS_KEY_SECRET")
-
-        auth = oss2.Auth(self.access_key_id, self.access_key_secret)
-        self.bucket = oss2.Bucket(auth, self.endpoint, self.bucket_name)
-
-    def _build_object_key(self, file_path, person_info=None, folder_prefix=None):
-        """
-        生成 OSS object key
-        支持：reports/<folder_prefix>/<filename> 或 reports/YYYY/MM/DD/<filename>
-        """
-        if folder_prefix:
-            date_dir = f"reports/{folder_prefix}/"
+    def __init__(self, is_prod=None):
+        if is_prod is None:
+            self.is_prod = os.getenv("IS_PROD") == "1"
         else:
-            date_dir = datetime.now().strftime("reports/%Y/%m/%d/")
-            
-        filename = os.path.basename(file_path)
+            self.is_prod = is_prod
+        if self.is_prod:
+            self.endpoint = "https://openapi.health-100.cn"
+            self.mnappid = "CIMIN_OSS_UPLOAD"
+            self.mnappsecret = "sfm4mvtyez6ctevmuvzup5nn9j1z949uu9z7e5jfkoxxom25jab513dnnllo851s"
+            self.bucket_name = "mn-ciming-report"
+            self.role_arn = "cimingOssUpload_fSeKbHwA"
+        else:
+            self.endpoint = "https://openapi-test.health-100.cn"
+            self.mnappid = "CIMING_FILE_UPLOAD"
+            self.mnappsecret = "ihzrfgq30g5l5cerguxgyoogozr3f53ibcxso5hy7zmtjmaz44c48dsh0gvgif57"
+            self.bucket_name = "mn-ciming-report"
+            self.role_arn = "ciming_qrTnPVj5"
 
-        report_id = ""
-        if isinstance(person_info, dict):
-            report_id = str(person_info.get("report_id", "")).strip()
+    def _generate_sign(self, timestamp):
+        import hashlib
+        # mnsign = sha256HexString(mnappid + mntimestamp + "" + mnappsecret)
+        raw_str = f"{self.mnappid}{timestamp}{self.mnappsecret}"
+        return hashlib.sha256(raw_str.encode('utf-8')).hexdigest()
 
-        safe_filename = filename.replace("\\", "_").replace("/", "_")
+    def upload_pdf(self, file_path, source_name=None, retries=2, folder_prefix=None, person_info=None):
+        if source_name is None:
+            source_name = "formal" if self.is_prod else "test"
 
-        if report_id:
-            return f"{date_dir}{report_id}-{safe_filename}"
-        return f"{date_dir}{safe_filename}"
-
-    def upload_pdf(self, file_path, source_name="Platform2", retries=2, person_info=None, folder_prefix=None):
         """
-        上传 PDF 到你自己的阿里云 OSS
+        通过角色上传文件
+        接口地址：/file-svc/api/file/uploadFileByRole
+
+        说明：
+        1. 强制不使用系统代理，避免 requests 走代理导致 10054 / 握手异常
+        2. fileDir 先使用纯日期格式，尽量贴近对方提供的成功示例
+        3. 保留对方文档要求的 multipart 参数和签名头
         """
         if not os.path.exists(file_path):
             return {"code": "error", "msg": f"文件不存在: {file_path}"}
 
-        object_key = self._build_object_key(file_path, person_info, folder_prefix)
+        upload_url = f"{self.endpoint}/file-svc/api/file/uploadFileByRole"
+
+
+        # 先按对方文档/截图，尽量使用简单日期目录
+        # 如果后续确认支持自定义子目录，再恢复 reports/<folder_prefix>
+        file_dir = datetime.now().strftime("%Y/%m/%d")
+
+        file_size = os.path.getsize(file_path)
+        file_name = os.path.basename(file_path)
 
         for attempt in range(retries + 1):
+            timestamp = str(int(time.time() * 1000))
+            sign = self._generate_sign(timestamp)
+
+            session = requests.Session()
+            session.trust_env = False  # 强制忽略系统代理/环境代理
+
+            headers = {
+                "mnappid": self.mnappid,
+                "mntimestamp": timestamp,
+                "mnsign": sign,
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json",
+                "Connection": "close",
+            }
+
+            data = {
+                "fileDir": file_dir,
+                "bucketName": self.bucket_name,
+                "roleArn": self.role_arn,
+                "source": source_name,   # 测试环境建议传 test
+            }
+
             try:
-                file_size = os.path.getsize(file_path)
                 print(f"[OSS] 正在上传 (尝试 {attempt + 1}): {file_path}")
-                print(f"[OSS] 目标路径: {object_key}")
+                print(f"[OSS] upload_url={upload_url}")
+                print(f"[OSS] fileDir={file_dir}")
+                print(f"[OSS] bucketName={self.bucket_name}")
+                print(f"[OSS] roleArn={self.role_arn}")
+                print(f"[OSS] source={source_name}")
+                print(f"[OSS] fileName={file_name}")
+                print(f"[OSS] fileSize={file_size}")
+                print(f"[OSS] mnappid={self.mnappid}")
+                print(f"[OSS] mntimestamp={timestamp}")
+                print(f"[OSS] mnsign={sign[:16]}...")
 
-                result = self.bucket.put_object_from_file(
-                    object_key, 
-                    file_path,
-                    headers={'Content-Type': 'application/pdf'}
-                )
+                with open(file_path, "rb") as f:
+                    files = {
+                        "multipartFile": (file_name, f, "application/pdf")
+                    }
 
-                if result.status == 200:
-                    encoded_key = urllib.parse.quote(object_key)
-                    public_url = f"https://{self.bucket_name}.{self.endpoint.replace('https://', '')}/{encoded_key}"
-
-                    signed_url = self.bucket.sign_url(
-                        method="GET",
-                        key=object_key,
-                        expires=3600
+                    response = session.post(
+                        upload_url,
+                        headers=headers,
+                        data=data,
+                        files=files,
+                        timeout=(15, 60),   # connect timeout, read timeout
+                        verify=True
                     )
 
-                    response = {
-                        "code": "000000",
-                        "msg": "成功",
-                        "data": {
-                            "key": object_key,
-                            "fileName": os.path.basename(object_key),
-                            "url": public_url,
-                            "signedUrl": signed_url,
-                            "bucket": self.bucket_name,
-                            "endpoint": self.endpoint,
-                            "source": source_name
-                        }
-                    }
+                print(f"[OSS] HTTP状态码: {response.status_code}")
+                print(f"[OSS] 响应前200字符: {response.text[:200]}")
 
-                    print(f"[OSS] 上传成功！Key: {object_key}")
-                    return response
+                response.raise_for_status()
 
-                return {
-                    "code": "error",
-                    "msg": f"上传失败，HTTP状态码: {result.status}"
-                }
-
-            except Exception as e:
-                print(f"[OSS] 尝试 {attempt + 1} 失败: {type(e).__name__}: {e}")
-                if attempt == retries:
+                try:
+                    result = response.json()
+                except Exception:
                     return {
                         "code": "error",
-                        "msg": f"上传重试 {retries} 次后仍然失败: {str(e)}"
+                        "msg": f"接口返回非JSON响应: HTTP {response.status_code}, body={response.text[:300]}"
                     }
 
-        return {"code": "error", "msg": "未知上传失败"}
+                print(f"[OSS] 业务响应: {json.dumps(result, ensure_ascii=False)}")
+                return result
+
+            except requests.exceptions.ConnectTimeout as e:
+                print(f"[OSS] 连接超时: {e}")
+            except requests.exceptions.ReadTimeout as e:
+                print(f"[OSS] 读取超时: {e}")
+            except requests.exceptions.SSLError as e:
+                print(f"[OSS] SSL/TLS 错误: {e}")
+            except requests.exceptions.ConnectionError as e:
+                print(f"[OSS] 连接错误: {e}")
+            except requests.exceptions.HTTPError as e:
+                body = ""
+                try:
+                    body = e.response.text[:300]
+                except Exception:
+                    pass
+                print(f"[OSS] HTTP错误: {e}, body={body}")
+                return {
+                    "code": "error",
+                    "msg": f"HTTP错误: {e}, body={body}"
+                }
+            except Exception as e:
+                print(f"[OSS] 未知异常: {type(e).__name__}: {e}")
+                return {
+                    "code": "error",
+                    "msg": f"{type(e).__name__}: {str(e)}"
+                }
+            finally:
+                session.close()
+
+            if attempt < retries:
+                wait_seconds = 2 * (attempt + 1)
+                print(f"[OSS] 第 {attempt + 1} 次失败，等待 {wait_seconds} 秒后重试...")
+                time.sleep(wait_seconds)
+
+        return {
+            "code": "error",
+            "msg": f"上传重试 {retries} 次后仍失败，疑似网络/白名单/网关/TLS拦截问题"
+        }
+
 
 
 class Platform3Notifier:
@@ -181,7 +242,7 @@ class Platform3Notifier:
             return {"code": "error", "msg": str(e)}
 
 
-def handle_upload_and_notify(file_path, person_info, is_prod=False, folder_prefix=None):
+def handle_upload_and_notify(file_path, person_info, is_prod=None, folder_prefix=None):
     """
     统一入口：上传 PDF 并通知平台 3
     """
