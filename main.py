@@ -41,6 +41,34 @@ def load_algorithm_config(csv_path):
         print(f"[WARN] 无法加载算法配置 {csv_path}: {e}。将使用默认内置逻辑。")
         return None
 
+def find_eeg_csv_file(search_dir="."):
+    """
+    自动查找当前目录下可用于脑电处理的 CSV 文件。
+    规则：
+    1. 只找当前目录，不递归子目录
+    2. 排除 algorithm_config.csv
+    3. 优先返回最近修改的 CSV
+    """
+    search_dir = os.path.abspath(search_dir)
+
+    csv_files = []
+    for f in os.listdir(search_dir):
+        full_path = os.path.join(search_dir, f)
+        if not os.path.isfile(full_path):
+            continue
+        if not f.lower().endswith(".csv"):
+            continue
+        if f.lower() == "algorithm_config.csv":
+            continue
+        csv_files.append(full_path)
+
+    if not csv_files:
+        return None
+
+    # 按最后修改时间倒序，取最新的一个
+    csv_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+    return csv_files[0]
+
 def populate_report(page, processor, person_info, scores, erp_lists, band_lists, feature_values):
     # 个人信息
     page.set_person_info(
@@ -114,11 +142,18 @@ def main():
     print("正在加载心理评估报告界面（客户版→专业版）...")
     print("=" * 60)
 
-    eeg_file_path = "20251216_H_2_s.csv"
-    if not os.path.exists(eeg_file_path):
-        QMessageBox.critical(None, "错误",
-                             f"未找到脑电数据文件：{eeg_file_path}\n请确保CSV文件在程序目录下。")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    eeg_file_path = find_eeg_csv_file(base_dir)
+
+    if not eeg_file_path:
+        QMessageBox.critical(
+            None,
+            "错误",
+            f"未找到可用的脑电 CSV 文件。\n请确保 CSV 文件在程序目录下：{base_dir}"
+        )
         sys.exit(1)
+
+    print(f"[OK] 自动识别到脑电数据文件：{eeg_file_path}")
 
     try:
         processor = EEGProcessor(eeg_file_path, fs=250)
