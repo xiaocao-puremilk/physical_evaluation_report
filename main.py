@@ -41,33 +41,44 @@ def load_algorithm_config(csv_path):
         print(f"[WARN] 无法加载算法配置 {csv_path}: {e}。将使用默认内置逻辑。")
         return None
 
-def find_eeg_csv_file(search_dir="."):
+def find_latest_data_package(data_dir="data"):
     """
-    自动查找当前目录下可用于脑电处理的 CSV 文件。
-    规则：
-    1. 只找当前目录，不递归子目录
-    2. 排除 algorithm_config.csv
-    3. 优先返回最近修改的 CSV
+    在 data/ 目录下查找最新的子文件夹，并从中匹配 CSV 和 JSON 文件。
+    返回: (csv_path, json_path, folder_name) 或 (None, None, None)
     """
-    search_dir = os.path.abspath(search_dir)
+    abs_data_dir = os.path.abspath(data_dir)
+    if not os.path.exists(abs_data_dir):
+        return None, None, None
 
-    csv_files = []
-    for f in os.listdir(search_dir):
-        full_path = os.path.join(search_dir, f)
+    # 获取所有子目录
+    subdirs = [os.path.join(abs_data_dir, d) for d in os.listdir(abs_data_dir) 
+               if os.path.isdir(os.path.join(abs_data_dir, d))]
+    
+    if not subdirs:
+        return None, None, None
+
+    # 按修改时间排序，取最新的
+    subdirs.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+    latest_dir = subdirs[0]
+    folder_name = os.path.basename(latest_dir)
+
+    csv_file = None
+    json_file = None
+
+    for f in os.listdir(latest_dir):
+        full_path = os.path.join(latest_dir, f)
         if not os.path.isfile(full_path):
             continue
-        if not f.lower().endswith(".csv"):
-            continue
-        if f.lower() == "algorithm_config.csv":
-            continue
-        csv_files.append(full_path)
+        if f.lower().endswith(".csv") and f.lower() != "algorithm_config.csv":
+            csv_file = full_path
+        elif f.lower().endswith(".json"):
+            json_file = full_path
 
-    if not csv_files:
-        return None
+    return csv_file, json_file, folder_name
 
-    # 按最后修改时间倒序，取最新的一个
-    csv_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-    return csv_files[0]
+def find_eeg_csv_file(search_dir="."):
+    """已废弃，由 find_latest_data_package 替代"""
+    return None
 
 def populate_report(page, processor, person_info, scores, erp_lists, band_lists, feature_values):
     # 个人信息
@@ -132,28 +143,30 @@ def populate_report(page, processor, person_info, scores, erp_lists, band_lists,
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--meta", type=str, default=None, help="Path to acquisition meta.json")
-    args, _ = parser.parse_known_args()
-
     app = QApplication(sys.argv)
 
     print("=" * 60)
-    print("正在加载心理评估报告界面（客户版→专业版）...")
+    print("正在加载心理评估报告界面（数据包全自动匹配模式）...")
     print("=" * 60)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    eeg_file_path = find_eeg_csv_file(base_dir)
+    data_root = os.path.join(base_dir, "data")
+    eeg_file_path, meta_json_path, csv_basename = find_latest_data_package(data_root)
 
     if not eeg_file_path:
         QMessageBox.critical(
             None,
             "错误",
-            f"未找到可用的脑电 CSV 文件。\n请确保 CSV 文件在程序目录下：{base_dir}"
+            f"未在 {data_root} 下找到有效的数据包（需包含 .csv 文件）。"
         )
         sys.exit(1)
 
-    print(f"[OK] 自动识别到脑电数据文件：{eeg_file_path}")
+    if meta_json_path:
+        print(f"[OK] 自动识别到数据包：{csv_basename}")
+        print(f"[OK] CSV路径: {eeg_file_path}")
+        print(f"[OK] JSON路径: {meta_json_path}")
+    else:
+        print(f"[WARN] 数据包 {csv_basename} 缺失 meta.json，将使用默认信息。")
 
     try:
         processor = EEGProcessor(eeg_file_path, fs=250)
@@ -181,10 +194,10 @@ def main():
         "signature_text": "本报告为算法自动生成结果，未进行医师审核签署"
     }
 
-    # 如果提供了 --meta，则用采集端输出覆盖默认值
-    if args.meta:
+    # 如果找到了 meta.json，则加载并覆盖默认值
+    if meta_json_path:
         try:
-            with open(args.meta, "r", encoding="utf-8") as f:
+            with open(meta_json_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
             if isinstance(meta, dict):
                 # 只覆盖我们需要的字段，避免 JSON 里多字段影响
@@ -199,9 +212,9 @@ def main():
                 if "signature_text" in meta and meta["signature_text"] not in (None, ""):
                     person_info["signature_text"] = meta["signature_text"]
 
-            print(f"[OK] Loaded meta from JSON: {args.meta}")
+            print(f"[OK] 已成功从数据包加载元数据：{meta_json_path}")
         except Exception as e:
-            print(f"[WARN] Failed to load meta JSON: {args.meta} | {e}")
+            print(f"[WARN] 加载元数据失败: {meta_json_path} | {e}")
 
     # ERP
     try:

@@ -64,7 +64,7 @@ class AliyunOSSUploader:
 
         # 先按对方文档/截图，尽量使用简单日期目录
         # 如果后续确认支持自定义子目录，再恢复 reports/<folder_prefix>
-        file_dir = datetime.now().strftime("%Y/%m/%d")
+        file_dir = datetime.now().strftime("%Y/%m/%d/")
 
         file_size = os.path.getsize(file_path)
         file_name = os.path.basename(file_path)
